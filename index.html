@@ -16,7 +16,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link
-        href="https://fonts.googleapis.com/css2?family=Great+Vibes&family=Outfit:wght@300;400;600&family=Bungee+Inline&family=Inter:wght@300;400;600&family=Nunito:wght@800;900&display=swap"
+        href="https://fonts.googleapis.com/css2?family=Great+Vibes&family=Outfit:wght@300;400;600&family=Bungee+Inline&family=Inter:wght@300;400;600&family=Nunito:wght@800;900&display=block"
         rel="stylesheet">
 
     <!-- Tailwind CSS -->
@@ -135,7 +135,17 @@
     <!-- Firebase SDKs (Modular) -->
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { getFirestore, collection, doc, getDoc, setDoc, updateDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import {
+            initializeFirestore,
+            persistentLocalCache,
+            persistentMultipleTabManager,
+            collection,
+            doc,
+            getDoc,
+            setDoc,
+            updateDoc,
+            onSnapshot
+        } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
         import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getStorage, ref, uploadBytes, getDownloadURL } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-storage.js";
 
@@ -156,6 +166,15 @@
         // Estado Global Explicito
         window.firebaseStatus = 'initializing'; // 'connected', 'disconnected', 'error'
         window.dbInstance = null; // Exponer para debug
+
+        // --- MECANISMO DE CONTROL DE CARGA (TIMEOUT) ---
+        // Si en 10 segundos no ha conectado, forzamos recarga para limpiar posibles cuelgues de Firebase
+        const connectionTimeout = setTimeout(() => {
+            if (window.firebaseStatus !== 'connected') {
+                console.warn("⚠️ Tiempo de conexión excedido (10s). Reiniciando aplicación...");
+                window.location.reload();
+            }
+        }, 10000);
 
         // --- 2. DATOS SEMILLA ---
         window.seedData = window.rawSeedData || { categories: [], theme: 'estancialamartina' };
@@ -389,28 +408,43 @@
             if (status === 'connected') {
                 isDemoMode = false;
                 window.dbInstance = db;
+                clearTimeout(connectionTimeout); // Limpiar timeout si conecta
             }
             if (window.onFirebaseStatusChange) {
                 window.onFirebaseStatusChange(status);
             }
         };
 
-        // --- INICIALIZACIÓN FIREBASE (NO BLOQUEANTE) ---
-        const initFirebase = async () => {
+        // --- INICIALIZACIÓN FIREBASE (OPTIMIZADA) ---
+        const initFirebase = () => {
             try {
                 updateStatus('connecting');
                 app = initializeApp(firebaseConfig);
-                db = getFirestore(app);
+
+                // Firestore con Caché Limitado (1MB) y Long Polling forzado para estabilidad
+                db = initializeFirestore(app, {
+                    localCache: persistentLocalCache({
+                        tabManager: persistentMultipleTabManager(),
+                        cacheSizeBytes: 1048576 // 1MB exacto
+                    }),
+                    experimentalForceLongPolling: true
+                });
+
                 auth = getAuth(app);
                 storage = getStorage(app);
 
+                // Flujo de Autenticación basado en Promesas para máxima estabilidad
                 onAuthStateChanged(auth, (user) => {
                     if (user) {
                         updateStatus('connected');
                     } else {
-                        signInAnonymously(auth).catch(e => {
-                            updateStatus('error', e);
-                        });
+                        signInAnonymously(auth)
+                            .then(() => {
+                                // El mismo onAuthStateChanged capturará el cambio
+                            })
+                            .catch(e => {
+                                updateStatus('error', e);
+                            });
                     }
                 });
             } catch (e) {
@@ -523,9 +557,23 @@
             const cropperRef = useRef(null);
             const imageElementRef = useRef(null);
 
+            // Sincronización de Fuentes para evitar parpadeo (FOUT)
+            const [fontsReady, setFontsReady] = useState(false);
+
             // Fetch inicial
             useEffect(() => {
                 let isMounted = true;
+
+                // Esperar a que las fuentes estén listas
+                if (document.fonts) {
+                    document.fonts.ready.then(() => {
+                        if (isMounted) setFontsReady(true);
+                    });
+                } else {
+                    // Fallback para navegadores antiguos
+                    setFontsReady(true);
+                }
+
                 window.onFirebaseStatusChange = (status) => {
                     if (isMounted) setDbStatus(status);
                 };
@@ -534,14 +582,14 @@
 
             // Efecto: Cargar SOLO cuando DB conectada (Carga Única)
             useEffect(() => {
-                if (dbStatus === 'connected') {
+                if (dbStatus === 'connected' && fontsReady) { // Esperar también a las fuentes
                     setLoading(true);
                     window.fetchMenu().then(data => {
                         setMenuData(data);
                         setLoading(false);
                     });
                 }
-            }, [dbStatus]);
+            }, [dbStatus, fontsReady]);
 
             useEffect(() => {
                 if (menuData && menuData.theme) {
@@ -732,7 +780,12 @@
                 window.saveMenuToDB(window.sortCategories(n));
             };
 
-            const handleSplashComplete = useCallback(() => { setShowSplash(false); }, []);
+            const handleSplashComplete = useCallback(() => {
+                // Solo ocultar si las fuentes están listas
+                if (fontsReady || !document.fonts) {
+                    setShowSplash(false);
+                }
+            }, [fontsReady]);
 
             if (showSplash) return <SplashScreen onComplete={handleSplashComplete} />;
 

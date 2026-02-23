@@ -2,7 +2,7 @@ import qrcode
 from PIL import Image, ImageDraw
 
 # URL del sitio web
-url = "https://menubqto.github.io/ELBARCITO/"
+url = "https://menubqto.github.io/CASA-LA-MARTINA/"
 
 # Crear el código QR con alta corrección de errores (necesario para que funcione con logo)
 qr = qrcode.QRCode(
@@ -21,7 +21,7 @@ qr_img = qr.make_image(fill_color="black", back_color="white").convert('RGB')
 
 # Abrir el logo del restaurante
 try:
-    logo = Image.open("logo_new.png")
+    logo = Image.open("logo.png")
     
     # Calcular el tamaño del logo (37.5% del QR - 50% más grande que antes)
     qr_width, qr_height = qr_img.size
@@ -44,7 +44,7 @@ try:
     draw = ImageDraw.Draw(qr_img)
     draw.rectangle(
         [box_pos[0], box_pos[1], box_pos[0] + box_size, box_pos[1] + box_size],
-        fill="black",
+        fill="white",
         outline="white",
         width=2
     )
@@ -60,7 +60,7 @@ try:
     
     print(f"[OK] Logo agregado al QR con recuadro negro")
 except FileNotFoundError:
-    print(f"[ADVERTENCIA] No se encontro logo_new.png, generando QR sin logo")
+    print(f"[ADVERTENCIA] No se encontro logo.png, generando QR sin logo")
 except Exception as e:
     print(f"[ADVERTENCIA] Error al agregar logo: {e}")
 
